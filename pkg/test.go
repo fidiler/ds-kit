@@ -2,11 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/dslock/pkg/zookeeper"
-	dsSync "github.com/dslock/pkg/zookeeper/sync"
-	"github.com/dslock/pkg/zookeeper/sync/driver"
+	"github.com/ds-kit/pkg/zookeeper"
+	dsSync "github.com/ds-kit/pkg/zookeeper/sync"
+	"github.com/ds-kit/pkg/zookeeper/sync/driver"
 	"github.com/samuel/go-zookeeper/zk"
-	"sync"
 	"time"
 )
 
@@ -17,17 +16,27 @@ func main() {
 		panic(err)
 	}
 
-	var count = 0
-	var wg sync.WaitGroup
+	//var count = 0
+	//var wg sync.WaitGroup
 
-	mu := dsSync.NewDSMutex(zookeeper.NewFramework(conn, zk.WorldACL(zk.PermAll)), new(driver.Standard), "/lock")
-	err = mu.Acquire()
+	mu, err := dsSync.NewDSMutex(zookeeper.NewFramework(conn, zk.WorldACL(zk.PermAll)), new(driver.Standard), "/lock")
 	if err != nil {
 		panic(err)
 	}
 
-	err = mu.Acquire()
-	if err != nil {
+	if err = mu.Acquire(); err != nil {
+		panic(err)
+	}
+
+	if err = mu.Acquire(); err != nil {
+		panic(err)
+	}
+
+	if err = mu.Acquire(); err != nil {
+		panic(err)
+	}
+
+	if err = mu.Acquire(); err != nil {
 		panic(err)
 	}
 
@@ -37,29 +46,45 @@ func main() {
 		panic(err)
 	}
 
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-
-			mu := dsSync.NewDSMutex(zookeeper.NewFramework(conn, zk.WorldACL(zk.PermAll)), new(driver.Standard), "/lock")
-			err := mu.Acquire()
-			if err != nil {
-				panic(err)
-			}
-
-			err = mu.Acquire()
-			if err != nil {
-				panic(err)
-			}
-			count+=10
-			if err := mu.Release(); err != nil {
-				panic(err)
-			}
-			wg.Done()
-		}()
+	if err := mu.Release(); err != nil {
+		panic(err)
 	}
 
-	wg.Wait()
-	fmt.Println(count)
+	if err := mu.Release(); err != nil {
+		panic(err)
+	}
+
+	if err := mu.Release(); err != nil {
+		panic(err)
+	}
+
+	if err = mu.Acquire(); err != nil {
+		panic(err)
+	}
+
+	//for i := 0; i < 10; i++ {
+	//	wg.Add(1)
+	//	go func() {
+	//
+	//		mu := dsSync.NewDSMutex(zookeeper.NewFramework(conn, zk.WorldACL(zk.PermAll)), new(driver.standard), "/lock")
+	//		err := mu.Acquire()
+	//		if err != nil {
+	//			panic(err)
+	//		}
+	//
+	//		err = mu.Acquire()
+	//		if err != nil {
+	//			panic(err)
+	//		}
+	//		count+=10
+	//		if err := mu.Release(); err != nil {
+	//			panic(err)
+	//		}
+	//		wg.Done()
+	//	}()
+	//}
+	//
+	//wg.Wait()
+	//fmt.Println(count)
 }
 

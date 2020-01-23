@@ -2,8 +2,8 @@ package driver
 
 import (
 	"fmt"
-	"github.com/dslock/pkg/zookeeper"
-	"github.com/dslock/pkg/zookeeper/sync/children"
+	"github.com/ds-kit/pkg/zookeeper"
+	"github.com/ds-kit/pkg/zookeeper/sync/children"
 	"github.com/samuel/go-zookeeper/zk"
 	"strings"
 )
@@ -61,7 +61,6 @@ func (s *Standard) FilterChildrenCollection(child []string, completePath, pathIn
 
 	return collection
 }
-
 
 func (s *Standard) LockCompareName(completeLockName, lockName string) string {
 	lastIndex := strings.LastIndex(completeLockName, lockName)

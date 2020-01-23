@@ -11,11 +11,11 @@ func MakePath(path, child string) string {
 
 func ValidatePath(path string) error {
 	if path == "" {
-		return errors.New("Path cannot be null")
+		return errors.New("path cannot be null")
 	}
 
 	if path[0] != '/' {
-		return errors.New("Path must start with / character")
+		return errors.New("path must start with / character")
 	}
 
 	if len(path) == 1 {
@@ -23,7 +23,7 @@ func ValidatePath(path string) error {
 	}
 
 	if path[len(path)-1] == '/' {
-		return errors.New("Path must not end with / character")
+		return errors.New("path must not end with / character")
 	}
 
 	for i, nextCharacter := 1, '/'; i < len(path); i++ {

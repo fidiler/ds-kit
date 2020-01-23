@@ -2,87 +2,91 @@ package sync
 
 import (
 	"fmt"
-	"github.com/dslock/pkg/zookeeper"
-	"github.com/dslock/pkg/zookeeper/sync/children"
-	"github.com/dslock/pkg/zookeeper/sync/driver"
-	"github.com/dslock/pkg/zookeeper/util"
+	"github.com/ds-kit/pkg/zookeeper"
+	"github.com/ds-kit/pkg/zookeeper/sync/children"
+	"github.com/ds-kit/pkg/zookeeper/sync/driver"
+	"github.com/ds-kit/pkg/zookeeper/util"
 	"github.com/samuel/go-zookeeper/zk"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 var LOCK_NAME = "lock-"
 
-var gid uint32
-
-var once sync.Once
-
-
 type DSMutex struct {
-	Path       string
-	ParentPath string
-	LockPath   string
-	Standard   *driver.Standard
+	mu         sync.Mutex
+	path       string
+	parentPath string
+	standard   *driver.Standard
 	framework  *zookeeper.Framework
-
-	gdata sync.Map
-	mu    sync.Mutex
+	lockdata   *lockData
 }
 
 func NewDSMutex(framework *zookeeper.Framework, standardDriver *driver.Standard, path string) (*DSMutex, error) {
-	once.Do(func() {
-		atomic.StoreUint32(&gid, 1)
-	})
-
-	atomic.AddUint32(&gid, 1)
-
 	if err := util.ValidatePath(path); err != nil {
 		return nil, err
 	}
 
 	mu := &DSMutex{
 		framework:  framework,
-		Standard:   standardDriver,
-		Path:       util.MakePath(path, LOCK_NAME),
-		ParentPath: path,
+		standard:   standardDriver,
+		lockdata:   newLockData(),
+		path:       util.MakePath(path, LOCK_NAME),
+		parentPath: path,
 	}
 
+	return mu, nil
 }
 
 func (d *DSMutex) Acquire() error {
-	if err := d.attemptLock(-1); err != nil {
+	if d.lockdata.lockUse() {
+		d.lockdata.incrementLockCount()
+		return nil
+	}
+
+	attempted, lockPath, err := d.attemptLock(-1)
+	if err != nil {
 		return err
+	}
+
+	if attempted {
+		d.lockdata.incrementLockCount()
+		d.lockdata.setLockPath(lockPath)
 	}
 
 	return nil
 }
 
 func (d *DSMutex) AcquireTimeout(milliWaitTime int64) error {
-	if err := d.attemptLock(milliWaitTime); err != nil {
-		return err
+	if d.lockdata.lockUse() {
+		d.lockdata.incrementLockCount()
+		return nil
 	}
 
-	return nil
-}
-
-func (d *DSMutex) attemptLock(milliWaitTime int64) error {
-	path, err := d.Standard.CreateLock(d.framework, d.ParentPath, d.Path)
-	if err != nil {
-		return err
-	}
-
-	startTime := time.Now()
-	attempted, err := d.tryAttemptLock(path, startTime, milliWaitTime)
+	attempted, lockPath, err := d.attemptLock(milliWaitTime)
 	if err != nil {
 		return err
 	}
 
 	if attempted {
-		d.LockPath = path
+		d.lockdata.incrementLockCount()
+		d.lockdata.setLockPath(lockPath)
 	}
 
 	return nil
+}
+
+func (d *DSMutex) attemptLock(milliWaitTime int64) (attempted bool, lockPath string, err error) {
+	if lockPath, err = d.standard.CreateLock(d.framework, d.parentPath, d.path); err != nil {
+		return
+	}
+
+	startTime := time.Now()
+	if attempted, err = d.tryAttemptLock(lockPath, startTime, milliWaitTime); err != nil {
+		return
+	}
+
+	return
 }
 
 func (d *DSMutex) tryAttemptLock(path string, startTime time.Time, milliWait int64) (bool, error) {
@@ -95,14 +99,14 @@ func (d *DSMutex) tryAttemptLock(path string, startTime time.Time, milliWait int
 
 		}
 
-		filteredChildren := d.Standard.FilterChildrenCollection(child, path, path[len(d.ParentPath)+1:], 1)
+		filteredChildren := d.standard.FilterChildrenCollection(child, path, path[len(d.parentPath)+1:], 1)
 		// the current child is first in zookeeper
 		if filteredChildren.IsFirstChild {
 			return true, nil
 		}
 
 		// to watch previous node
-		_, _, eventCh, err := d.framework.Conn.GetW(d.ParentPath + "/" + filteredChildren.WatchPath)
+		_, _, eventCh, err := d.framework.Conn.GetW(d.parentPath + "/" + filteredChildren.WatchPath)
 		if err == nil {
 			if milliWait > 0 {
 				milliWait -= time.Now().Sub(startTime).Milliseconds()
@@ -154,12 +158,12 @@ func (d *DSMutex) tryAttemptLock(path string, startTime time.Time, milliWait int
 }
 
 func (d *DSMutex) GetSortedChild() ([]string, error) {
-	child, _, err := d.framework.Conn.Children(d.ParentPath)
+	child, _, err := d.framework.Conn.Children(d.parentPath)
 	if err != nil {
 		return nil, err
 	}
 
-	children.Sort(child, LOCK_NAME, d.Standard.LockCompareName)
+	children.Sort(child, LOCK_NAME, d.standard.LockCompareName)
 
 	return child, nil
 }
@@ -169,13 +173,25 @@ func (d *DSMutex) Release() error {
 }
 
 func (d *DSMutex) releaseLock() error {
-	if d.LockPath != "" {
-		err := d.Standard.DeleteLock(d.framework, d.LockPath)
-		if err != nil {
-			return err
-		}
+	if !d.lockdata.lockUse() {
+		panic("you do not own the lock: " + d.path)
 	}
 
-	d.LockPath = ""
+	d.lockdata.decrementLockCount()
+
+	if d.lockdata.getLockCount() > 0 {
+		return nil
+	}
+
+	if d.lockdata.getLockCount() < 0 {
+		panic("lock count has gone negative for lock: " + d.path)
+	}
+
+	if err := d.standard.DeleteLock(d.framework, d.lockdata.getLockPath()); err != nil {
+		return err
+	}
+
+	d.lockdata.cleanLockData()
+
 	return nil
 }
